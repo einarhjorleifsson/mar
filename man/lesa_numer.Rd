@@ -3,9 +3,6 @@
 \name{lesa_numer}
 \alias{lesa_numer}
 \title{Talningar}
-\usage{
-lesa_numer(mar)
-}
 \arguments{
 \item{mar}{src_oracle tenging við oracle}
 }
@@ -16,8 +13,3 @@ dataframe
 Fallid myndar tengingu við toflu numer
 í fiskar gagnagrunninum.
 }
-\examples{
-mar <- dplyrOracle::src_oracle("mar")
-dplyr::glimpse(lesa_numer(mar))
-}
-

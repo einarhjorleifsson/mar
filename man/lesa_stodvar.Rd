@@ -3,9 +3,6 @@
 \name{lesa_stodvar}
 \alias{lesa_stodvar}
 \title{Stodvarupplysingar}
-\usage{
-lesa_stodvar(mar)
-}
 \arguments{
 \item{mar}{src_oracle tenging við oracle}
 }
@@ -20,4 +17,3 @@ Fallid myndar tengingu við "view" toflu v_stodvar
 mar <- dplyrOracle::src_oracle("mar")
 dplyr::glimpse(lesa_stodvar(mar))
 }
-

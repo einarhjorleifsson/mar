@@ -1,99 +1,293 @@
 ---
 title: "mar"
+author: Bjarki Þór Elvarsson and Einar Hjörleifsson
 output: 
   html_document: 
     keep_md: yes
 ---
 
-## dplyr-erized connection to MRI oracle database
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+The small print: Package in the making
+
+## Tidyverse connection to MRI oracle database
+
+The [`dplyr`-package](https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html) is designed so that, in addition to working with local R-data.frames, it works with remote on-disk data stored in databases. [Inbuilt functions within dplyr](https://cran.rstudio.com/web/packages/dplyr/vignettes/databases.html) allow seamless connectivity with sqlite, mysql and postgresql. Due to some idiosyncrasies associated with schema as well as issues related to case-sensitivity make "default" communication with Oracle not straight forward. These as well as other convenience wrappers are taken care of in the `mar`-packages.
+
+### Installation
+
+You have to do this once, or when you want to update the packages already installed on your computer:
+
+```{r, eval = FALSE}
+install.packages("tidyverse")
+# install.packages("devtools")
+devtools::install_github("fishvice/mar",  dependencies = FALSE)
+```
+
+Windows users may encounter issues when installing the mar - package related to different binary modes (32 bit vs 64 bit) where the user is prompted with the following error 
+
+> ERROR: loading failed for 'i386'
+
+This issue can be bypassed by installing mar using: 
+```{r, eval = FALSE}
+devtools::install_github("fishvice/mar",  dependencies = FALSE, args='--no-multiarch')
+```
+
+
+### Establish connection
 
 ```{r, message = FALSE}
-# devtools::install_github("bernardocaldas/dplyrOracle")
-# devtools::install_github("einarhjorleifsson/mar")
-library(ggplot2)
 library(mar)
-library(dplyr)
-library(dplyrOracle)
-mar <- src_oracle("mar")
-st <-
-  lesa_stodvar(mar) %>%
-  filter(ar %in% c(1985:2016),
-         veidarf == 73)
 ```
 
+Connection to MRI Oracle database:
+```{r}
+con <- connect_mar()
+```
+
+### Some (hopefully) gentle introduction
+___
+
+The core function in the `mar`-package is the `tbl_mar`-function. It takes two arguments, the "connection" and the name of the oracle table. E.g. to establish a connection to the table "lengdir" in the schema "fiskar" one can do:
+```{r}
+lengdir <- tbl_mar(con, "fiskar.lengdir")
+```
+What class is lengdir?:
+```{r}
+class(lengdir)
+```
+The class here is somewhat obtuse. Lets not worry about that to much. What has happened behind the scene one can realize by:
+```{r}
+show_query(lengdir) 
+```
+Ergo we generated an object, which one part is an SQL-query. The `show_query` informs us how the database plans to execute the query.
+
+The operation has not yet touched the database. It’s not until you ask for the data (e.g. by printing lengdir) that dplyr generates the SQL and requests the results from the database. Even then it only pulls down 10 rows.
+```{r}
+lengdir
+```
+Now, there are columns returned that we have little interest in (sbt:snn). Using the `dplyr`-verbs (functions) one can easily build upon the base query, e.g.:
+```{r}
+lengdir %>% 
+  select(synis_id, tegund, lengd, fjoldi, kyn, kynthroski)
+```
+
+Now if one were only interested in one species and one station we may extend the above as:
+```{r}
+lengdir <- 
+  tbl_mar(con, "fiskar.lengdir") %>% 
+  select(synis_id, tegund, lengd, fjoldi, kyn, kynthroski) %>% 
+  filter(synis_id == 48489,
+         tegund == 1)
+show_query(lengdir)
+```
+
+To pull down all the results into R one uses collect(), which returns a tidyverse data.frame (tbl_df):
+```{r}
+d <- 
+  lengdir %>% 
+  collect(n = Inf)
+class(d)
+dim(d)
+```
+
+A quick visualization of the data can be obtained via:
+```{r ldist}
+d %>% 
+  ggplot() +
+  geom_bar(aes(lengd, fjoldi), stat = "identity")
+```
+
+So we have the length distribution of measured cod from one sample (station). We do not however know what this sample is, because the column **synis_id** is just some gibberish automatically generated within Oracle. Before we deal with that, lets introduce `lesa_lengdir`-function that resides in the `mar`-package:
 
 ```{r}
-glimpse(st)
+lesa_lengdir(con)
 ```
 
+Here we have same columns as above with one additional column, **uppruni_lengdir**. This is because the function reads from two different tables, **fiskar.lengdir** and **fiskar.leidr_lengdir** and combines them into one. Hopefully this is only an interim measure - there are plans to merge these two data tables into one (lets keep our fingers crossed). 
 
-```{r smb1, message = FALSE, warning = FALSE}
-st %>% 
+Lets used `lesa_lengdir` as our starting point, this time lets ask the question how many fish by species were length measured from this yet unknown station:
+```{r}
+d <-
+  lesa_lengdir(con) %>% 
+  filter(synis_id == 48489) %>% 
+  group_by(tegund) %>% 
+  summarise(fjoldi = sum(fjoldi)) %>% 
+  arrange(fjoldi)
+show_query(d)
+```
+
+The SQL query has now become a bunch of gibberish for some of us. But this demonstrates that in addition to **select** and **filter** the `dplyr`-verbs **group_by**, **summarise** and **arrange** are "translated" into SQL :-) To see the outcome we do:
+```{r}
+d %>% collect(n = Inf)
+```
+
+Those familiar with the fiskar database know that these information are also available in the table **numer**. Here we can use the ``mar::lesa_numer` function:
+```{r}
+lesa_numer(con) %>% 
+  filter(synis_id == 48489)
+```
+
+```{r}
+tbl_mar(con, "fiskar.numer") %>% 
+  filter(synis_id == 48489) %>% 
+  select(tegund, fj_maelt, fj_talid) %>% 
+  arrange(fj_maelt) %>% 
+  collect(n = Inf)
+```
+
+So we get a dataframe that has more species than those obtained from `lesa_lengdir`. This is because the sample (station) also contained some species that were not measured, only counted.
+
+Information about the station that corresponds to synis_id = 48489 reside in the station table:
+```{r}
+lesa_stodvar(con) %>% 
+  filter(synis_id == 48489) %>% 
   collect() %>% 
-  mutate(lon1 = -gisland::geo_convert(kastad.lengd),
-         lat1 =  gisland::geo_convert(kastad.breidd)) %>% 
+  glimpse()
+```
+
+For those familiar with what is stored in **fiskar.stodvar** recognize that the station is most likely part of the 1991 spring survey (veidarfaeri = 73 and synaflokkur = 30 provides the best hint). What if we were to start from this end and get all the stations from the 1991 survey and also limit the number of columns returned:
+```{r}
+smb1991 <-
+  lesa_stodvar(con) %>% 
+  filter(ar == 1991,
+         veidarfaeri == 73,
+         synaflokkur == 30) %>% 
+  select(synis_id,
+         lon = kastad_v_lengd,
+         lat = kastad_n_breidd)
+```
+
+To get a quick plot of the station location we could do:
+```{r smb1991_stodvar}
+smb1991 %>% 
+  collect(n = Inf) %>% 
+  ggplot(aes(lon, lat)) +
+  geom_polygon(data = gisland::iceland, aes(long, lat, group = group)) +
+  geom_point(col = "red") +
+  coord_quickmap()
+```
+
+Looks about right. But what if we were interested in getting the total number of fish recorded at each station? Here we need to obtain the information from **fiskar.numer** for the station (synis_id) in question. This we do by using `left_join`:
+```{r}
+nu <- 
+  tbl_mar(con, "fiskar.numer") %>% 
+  group_by(synis_id) %>% 
+  summarise(n = sum(fj_maelt + fj_talid))
+smb1991_n <-
+  smb1991 %>% 
+  left_join(nu)
+```
+
+Again we have not done much more than generate an SQL-query and not touched the database. For those interested seeing the SQL-code do:
+```{r}
+show_query(smb1991_n)
+```
+
+To turn this into action, lets execute the query, get the dataframe into R and plot the data:
+```{r smb1991_n}
+smb1991_n %>% 
+  collect(n = Inf) %>% 
   ggplot() +
   theme_bw() +
-  geom_point(aes(lon1,lat1),alpha=0.2, size=1, col="red") +
-  geom_polygon(data=gisland::iceland,aes(long,lat,group=group),fill="grey90") +
-  coord_map(ylim=c(62,67.8), xlim=c(-31,-9)) +
-  labs(x = NULL,y = NULL, title = "Spring survey stations")
+  geom_polygon(data = gisland::iceland, aes(long, lat, group = group), fill = "grey") +
+  geom_point(aes(lon, lat, size = n), col = "red", alpha = 0.25) +
+  scale_size_area(max_size = 15) +
+  scale_x_continuous(NULL, NULL) +
+  scale_y_continuous(NULL, NULL) +
+  coord_quickmap()
 ```
 
-```{r smb2}
-cod <-
-  lesa_stodvar(mar) %>%
-  filter(ar %in% c(1985:2016),
-         veidarf == 73) %>% 
-  select(synis.id, ar) %>% 
-  left_join(lesa_lengdir(mar) %>%
-               filter(tegund %in% 1),
-            by = "synis.id") %>%
-  left_join(lesa_numer(mar) %>%
-              filter(tegund %in% 1) %>% 
-              select(synis.id, fj.talid, fj.maelt),
-            by = "synis.id") %>% 
-  collect(n = 1e7) # should be allowed to pass n = -1, but returns an error
-glimpse(cod)
-cod %>% 
-  mutate(r = (1 + fj.talid/fj.maelt),
-         fjoldi = r * fjoldi,
-         fjoldi = ifelse(is.na(fjoldi),0,fjoldi),
-         b = fjoldi * 0.01 * lengd^3) %>% 
-  group_by(ar, synis.id) %>% 
-  summarise(n = sum(fjoldi),
-            b = sum(b, na.rm = T)) %>% 
-  ggplot(aes(ar, b)) +
-  stat_summary(fun.data = "mean_cl_boot", colour = "red") +
-  expand_limits(y = 0) +
-  labs(x = NULL, y = NULL, title = "Cod: Bootstrap mean biomass and confidence interval") +
-  scale_x_continuous(breaks = seq(1985,2015,5))
+
+```{r, eval = FALSE, echo = FALSE}
+d <- lods_oslaegt(con) %>%
+  left_join(skipaskra(con) %>% select(skip_nr, flokkur), by = "skip_nr") %>% 
+  filter(fteg == 1,
+         flokkur != -4,
+         veidisvaedi == "I") %>%
+  group_by(timabil, gerd) %>%
+  summarise(afli = sum(magn_oslaegt)) %>%
+  arrange(timabil, gerd)
+show_query(d)
+d %>% collect(n = Inf)
 ```
 
-Doing summarization within Oracle:
+### Metadata
+
+List of tables available to the user (only first 10 tables shown here):
 ```{r}
-cod <-
-  lesa_stodvar(mar) %>%
-  filter(ar %in% c(1985:2016),
-         veidarf == 73) %>% 
-  select(synis.id, ar) %>% 
-  left_join(lesa_lengdir(mar) %>%
-               filter(tegund %in% 1),
-            by = "synis.id") %>%
-  left_join(lesa_numer(mar) %>%
-              filter(tegund %in% 1,
-                     fj.maelt > 0) %>% 
-              mutate(r = 1 + fj.talid/fj.maelt) %>% 
-              select(synis.id, r),
-            by = "synis.id") %>%
-  mutate(lengd = ifelse(is.na(lengd), 0, lengd),
-         fjoldi = ifelse(is.na(fjoldi), 0, fjoldi),
-         r = ifelse(is.na(r), 0 , r),
-         abu = r * fjoldi,
-         bio = r * fjoldi * 0.01 * lengd^3) %>% 
-  group_by(synis.id, ar) %>% 
-  summarise(n = sum(abu),
-            b = sum(bio)) %>% 
-  collect()
-glimpse(cod)
+mar_tables(con, schema = 'fiskar')
+```
+
+Description of the variables of a particular table (only first 10 variables shown here): 
+```{r}
+mar_fields(con,'fiskar.stodvar')
+```
+
+
+
+### Something else (more advanced)
+____
+
+... pending
+
+### Working with stomach data
+____
+
+Let's look at stomach samples. Restrict our analysis to fish from the spring survey after 1992.
+
+
+```{r}
+st <- 
+  lesa_stodvar(con) %>% 
+  filter(synaflokkur == 30, ar > 1992) %>% 
+  select(synis_id,ar)
+
+```
+  
+and only look at stomachs from cods between 40 and 80 fish
+
+```{r}
+tmp <- 
+  faeda_ranfiskar(con) %>% 
+  filter(lengd %in% 40:80,ranfiskur == 1) %>% 
+  mutate(weight = 0.01*lengd^3) %>% 
+  right_join(st) %>% 
+  left_join(faeda_thyngdir(con)) %>% 
+  mutate(faeduhopur = nvl(faeduhopur,'Empty'),
+         thyngd = nvl(thyngd,0))
+```
+
+Look at the average percentage of body weight capelin in the stomach is in the spring survey compared to other species
+```{r}
+tmp %>% 
+  left_join(tmp %>% 
+              group_by(flokk_id) %>% 
+              summarise(total = sum(thyngd))) %>% 
+  select(ar,flokk_id,faeduhopur,thyngd,total,weight) %>% 
+  group_by(ar,flokk_id,faeduhopur,weight) %>%  ## why do we have duplicate prey entries?
+  summarise(thyngd=sum(thyngd),total=sum(total)) %>% 
+  collect(n=Inf) %>% 
+  ungroup() %>% 
+  spread(faeduhopur,thyngd,fill=0) %>% ## this function should be availabe in the database
+  select(ar,flokk_id,weight,capelin=`mall vil`,total) %>% 
+  mutate(otherfood = (total - capelin)/weight,
+         capelin = capelin/weight) %>%  
+  select(ar,capelin,otherfood) %>% 
+  gather(Prey,prop,-ar) %>% 
+  group_by(ar,Prey) %>% 
+  summarise(prop=mean(prop,na.rm=TRUE)) %>% 
+  ggplot(aes(ar,prop,fill=Prey)) + geom_bar(stat = 'identity')
+  
+            
+```
+
+
+
+```{r}
+devtools::session_info()
 ```
