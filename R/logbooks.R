@@ -112,6 +112,8 @@ afli_lineha <- function(mar) {
 
 #' Grásleppunet
 #'
+#' Convenient function for the curious lumpfish
+#'
 #' @param mar
 #'
 #' @name afli_grasl

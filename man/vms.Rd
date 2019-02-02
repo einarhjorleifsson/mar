@@ -2,11 +2,13 @@
 % Please edit documentation in R/vms.R
 \name{vms}
 \alias{vms}
-\title{Lesa vms gögn}
+\title{VMS data}
 \arguments{
-\item{con}{XXX}
+\item{con}{connection to mar database}
 
-\item{year}{XXX}
+\item{t1}{Start date in the format "YYYY-MM-DD"}
+
+\item{t2}{End date in the format "YYYY-MM-DD"}
 }
 \description{
 Athugið aðgangur er takmarkaður við fáa notendur á Hafrannsóknastofnun

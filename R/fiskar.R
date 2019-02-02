@@ -11,8 +11,8 @@
 #' @export
 #'
 #' @examples
-#' mar <- dplyrOracle::src_oracle("mar")
-#' dplyr::glimpse(lesa_stodvar(mar))
+#' con <- connect_mar()
+#' lesa_stodvar(con) %>% glimpse()
 lesa_stodvar <- function(mar) {
   tbl_mar(mar,'fiskar.stodvar_mar_v')
 }
